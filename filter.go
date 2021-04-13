@@ -309,20 +309,20 @@ func (filter *MatchAll) Type() string {
 	return "matchall"
 }
 
-type FilterFwAttrs struct {
-	ClassId   uint32
-	InDev     string
-	Mask      uint32
-	Index     uint32
-	Buffer    uint32
-	Mtu       uint32
-	Mpu       uint16
-	Rate      uint32
-	AvRate    uint32
-	PeakRate  uint32
-	Action    TcPolAct
-	Overhead  uint16
-	LinkLayer int
+type FwFilter struct {
+	FilterAttrs
+	ClassId uint32
+	InDev   string
+	Mask    uint32
+	Police  *PoliceAction
+}
+
+func (filter *FwFilter) Attrs() *FilterAttrs {
+	return &filter.FilterAttrs
+}
+
+func (filter *FwFilter) Type() string {
+	return "fw"
 }
 
 type BpfFilter struct {

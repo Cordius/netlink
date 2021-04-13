@@ -428,6 +428,12 @@ func TestFilterFwAddDel(t *testing.T) {
 		t.Fatal("Failed to add class")
 	}
 
+	police := NewPoliceAction()
+	police.Burst = 12345
+	police.Rate = 1234
+	police.PeakRate = 2345
+	police.Action = TcAct(TC_POLICE_SHOT)
+
 	filterattrs := FilterAttrs{
 		LinkIndex: link.Attrs().Index,
 		Parent:    MakeHandle(0xffff, 0),
@@ -435,20 +441,14 @@ func TestFilterFwAddDel(t *testing.T) {
 		Priority:  1,
 		Protocol:  unix.ETH_P_IP,
 	}
-	fwattrs := FilterFwAttrs{
-		Buffer:   12345,
-		Rate:     1234,
-		PeakRate: 2345,
-		Action:   TC_POLICE_SHOT,
-		ClassId:  MakeHandle(0xffff, 2),
+
+	filter := FwFilter{
+		FilterAttrs: filterattrs,
+		ClassId:     MakeHandle(0xffff, 2),
+		Police:      police,
 	}
 
-	filter, err := NewFw(filterattrs, fwattrs)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := FilterAdd(filter); err != nil {
+	if err := FilterAdd(&filter); err != nil {
 		t.Fatal(err)
 	}
 
@@ -459,11 +459,11 @@ func TestFilterFwAddDel(t *testing.T) {
 	if len(filters) != 1 {
 		t.Fatal("Failed to add filter")
 	}
-	fw, ok := filters[0].(*Fw)
+	fw, ok := filters[0].(*FwFilter)
 	if !ok {
 		t.Fatal("Filter is the wrong type")
 	}
-	if fw.Police.Rate.Rate != filter.Police.Rate.Rate {
+	if fw.Police.Rate != filter.Police.Rate {
 		t.Fatal("Police Rate doesn't match")
 	}
 	if fw.ClassId != filter.ClassId {
@@ -472,11 +472,11 @@ func TestFilterFwAddDel(t *testing.T) {
 	if fw.InDev != filter.InDev {
 		t.Fatal("InDev doesn't match")
 	}
-	if fw.AvRate != filter.AvRate {
+	if fw.Police.AvRate != filter.Police.AvRate {
 		t.Fatal("AvRate doesn't match")
 	}
 
-	if err := FilterDel(filter); err != nil {
+	if err := FilterDel(&filter); err != nil {
 		t.Fatal(err)
 	}
 	filters, err = FilterList(link, MakeHandle(0xffff, 0))
