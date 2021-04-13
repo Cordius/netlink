@@ -415,6 +415,53 @@ func toAttrs(tcgen *nl.TcGen, attrs *ActionAttrs) {
 	attrs.Bindcnt = int(tcgen.Bindcnt)
 }
 
+func encodePolice(attr *nl.RtAttr, action *PoliceAction) error {
+	var rtab [256]uint32
+	var ptab [256]uint32
+	police := nl.TcPolice{}
+	police.Index = uint32(action.Attrs().Index)
+	police.Bindcnt = int32(action.Attrs().Bindcnt)
+	police.Capab = uint32(action.Attrs().Capab)
+	police.Refcnt = int32(action.Attrs().Refcnt)
+	police.Rate.Rate = action.Rate
+	police.PeakRate.Rate = action.PeakRate
+	police.Action = int32(action.ExceedAction)
+
+	if police.Rate.Rate != 0 {
+		police.Rate.Mpu = action.Mpu
+		police.Rate.Overhead = action.Overhead
+		if CalcRtable(&police.Rate, rtab[:], action.RCellLog, action.Mtu, action.LinkLayer) < 0 {
+			return errors.New("TBF: failed to calculate rate table")
+		}
+		police.Burst = Xmittime(uint64(police.Rate.Rate), action.Burst)
+	}
+
+	police.Mtu = action.Mtu
+	if police.PeakRate.Rate != 0 {
+		police.PeakRate.Mpu = action.Mpu
+		police.PeakRate.Overhead = action.Overhead
+		if CalcRtable(&police.PeakRate, ptab[:], action.PCellLog, action.Mtu, action.LinkLayer) < 0 {
+			return errors.New("POLICE: failed to calculate peak rate table")
+		}
+	}
+
+	attr.AddRtAttr(nl.TCA_POLICE_TBF, police.Serialize())
+	if police.Rate.Rate != 0 {
+		attr.AddRtAttr(nl.TCA_POLICE_RATE, SerializeRtab(rtab))
+	}
+	if police.PeakRate.Rate != 0 {
+		attr.AddRtAttr(nl.TCA_POLICE_PEAKRATE, SerializeRtab(ptab))
+	}
+	if action.AvRate != 0 {
+		attr.AddRtAttr(nl.TCA_POLICE_AVRATE, nl.Uint32Attr(action.AvRate))
+	}
+	if action.NotExceedAction != 0 {
+		attr.AddRtAttr(nl.TCA_POLICE_RESULT, nl.Uint32Attr(uint32(action.NotExceedAction)))
+	}
+
+	return nil
+}
+
 func EncodeActions(attr *nl.RtAttr, actions []Action) error {
 	tabIndex := int(nl.TCA_ACT_TAB)
 
@@ -422,6 +469,14 @@ func EncodeActions(attr *nl.RtAttr, actions []Action) error {
 		switch action := action.(type) {
 		default:
 			return fmt.Errorf("unknown action type %s", action.Type())
+		case *PoliceAction:
+			table := attr.AddRtAttr(tabIndex, nil)
+			tabIndex++
+			table.AddRtAttr(nl.TCA_ACT_KIND, nl.ZeroTerminated("police"))
+			aopts := table.AddRtAttr(nl.TCA_ACT_OPTIONS, nil)
+			if err := encodePolice(aopts, action); err != nil {
+				return err
+			}
 		case *MirredAction:
 			table := attr.AddRtAttr(tabIndex, nil)
 			tabIndex++
@@ -516,6 +571,29 @@ func EncodeActions(attr *nl.RtAttr, actions []Action) error {
 	return nil
 }
 
+func parsePolice(data syscall.NetlinkRouteAttr, police *PoliceAction) {
+	switch data.Attr.Type {
+	case nl.TCA_POLICE_RESULT:
+		police.NotExceedAction = TcPolAct(native.Uint32(data.Value[0:4]))
+	case nl.TCA_POLICE_AVRATE:
+		police.AvRate = native.Uint32(data.Value[0:4])
+	case nl.TCA_POLICE_TBF:
+		p := *nl.DeserializeTcPolice(data.Value)
+		police.ActionAttrs = ActionAttrs{}
+		police.Attrs().Index = int(p.Index)
+		police.Attrs().Bindcnt = int(p.Bindcnt)
+		police.Attrs().Capab = int(p.Capab)
+		police.Attrs().Refcnt = int(p.Refcnt)
+		police.ExceedAction = TcPolAct(p.Action)
+		police.Rate = p.Rate.Rate
+		police.PeakRate = p.PeakRate.Rate
+		police.Burst = Xmitsize(uint64(p.Rate.Rate), p.Burst)
+		police.Mtu = p.Mtu
+		police.LinkLayer = int(p.Rate.Linklayer) & nl.TC_LINKLAYER_MASK
+		police.Overhead = p.Rate.Overhead
+	}
+}
+
 func parseActions(tables []syscall.NetlinkRouteAttr) ([]Action, error) {
 	var actions []Action
 	for _, table := range tables {
@@ -544,6 +622,8 @@ func parseActions(tables []syscall.NetlinkRouteAttr) ([]Action, error) {
 					action = &TunnelKeyAction{}
 				case "skbedit":
 					action = &SkbEditAction{}
+				case "police":
+					action = &PoliceAction{}
 				default:
 					break nextattr
 				}
@@ -622,6 +702,8 @@ func parseActions(tables []syscall.NetlinkRouteAttr) ([]Action, error) {
 							gen := *nl.DeserializeTcGen(adatum.Value)
 							toAttrs(&gen, action.Attrs())
 						}
+					case "police":
+						parsePolice(adatum, action.(*PoliceAction))
 					}
 				}
 			}

@@ -260,6 +260,40 @@ func NewSkbEditAction() *SkbEditAction {
 	}
 }
 
+type PoliceAction struct {
+	ActionAttrs
+	Rate            uint32 // in byte per second
+	Burst           uint32 // in byte
+	RCellLog        int
+	Mtu             uint32
+	Mpu             uint16 // in byte
+	PeakRate        uint32 // in byte per second
+	PCellLog        int
+	AvRate          uint32 // in byte per second
+	Overhead        uint16
+	LinkLayer       int
+	ExceedAction    TcPolAct
+	NotExceedAction TcPolAct
+}
+
+func (action *PoliceAction) Type() string {
+	return "police"
+}
+
+func (action *PoliceAction) Attrs() *ActionAttrs {
+	return &action.ActionAttrs
+}
+
+func NewPoliceAction() *PoliceAction {
+	return &PoliceAction{
+		RCellLog:        -1,
+		PCellLog:        -1,
+		LinkLayer:       1, // ETHERNET
+		ExceedAction:    TC_POLICE_RECLASSIFY,
+		NotExceedAction: TC_POLICE_OK,
+	}
+}
+
 // MatchAll filters match all packets
 type MatchAll struct {
 	FilterAttrs
